@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\OrderStatus;
 use App\Enums\RiskLevel;
+use App\Events\OrderCreated;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Model;
@@ -26,4 +27,8 @@ class Order extends Model
             'amount' => 'decimal:2',
         ];
     }
+
+    protected $dispatchesEvents = [
+        'created' => OrderCreated::class,
+    ];
 }
