@@ -16,19 +16,21 @@ class ConsumeOrders extends Command
     {
         $this->info('Starting order consumer...');
 
-        pcntl_async_signals(true);
-        pcntl_signal(SIGTERM, fn () => $this->shouldStop = true);
-        pcntl_signal(SIGINT, fn () => $this->shouldStop = true);
+        if (function_exists('pcntl_async_signals')) {
+            pcntl_async_signals(true);
+            pcntl_signal(SIGTERM, fn () => $this->shouldStop = true);
+            pcntl_signal(SIGINT, fn () => $this->shouldStop = true);
+        }
 
-        $rabbitMQ->connect();
+        $rabbitMQ->setupTopology();
 
         $queues = config('rabbitmq.queues');
 
         foreach ($queues as $level => $queue) {
-            $this->registerConsumer($rabbitMQ, $queue, $level);
+            $this->registerConsumer($rabbitMQ, $queue['name'], $level);
         }
 
-        $this->info('Listening on queues: ' . implode(', ', $queues));
+        $this->info('Listening on queues: ' . implode(', ', array_column($queues, 'name')));
 
         $channel = $rabbitMQ->getChannel();
 
@@ -51,6 +53,7 @@ class ConsumeOrders extends Command
                 'safe' => $this->info("[{$queue}] Order {$orderId}: APPROVED - {$data['reasoning']}"),
                 'suspicious' => $this->warn("[{$queue}] Order {$orderId}: REVIEWING - {$data['reasoning']}"),
                 'fraud' => $this->error("[{$queue}] Order {$orderId}: BLOCKED - {$data['reasoning']}"),
+                'audit' => $this->warn("[{$queue}] AUDIT Order {$orderId} ({$data['risk_level']}): {$data['reasoning']}"),
             };
         });
     }

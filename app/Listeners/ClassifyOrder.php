@@ -36,9 +36,9 @@ class ClassifyOrder implements ShouldQueue
                 'status' => $status,
             ]);
 
-            $queue = config("rabbitmq.queues.{$riskLevel->value}");
+            $routingKey = "order.{$riskLevel->value}";
 
-            $this->rabbitMQ->publish($queue, [
+            $this->rabbitMQ->publish($routingKey, [
                 'order_id' => $order->id,
                 'risk_level' => $riskLevel->value,
                 'status' => $status->value,
@@ -47,7 +47,7 @@ class ClassifyOrder implements ShouldQueue
                 'reasoning' => $result['reasoning'],
             ]);
 
-            Log::info("Order {$order->id} classified as {$riskLevel->value}, routed to {$queue}");
+            Log::info("Order {$order->id} classified as {$riskLevel->value}, routed with key {$routingKey}");
         } catch (\Throwable $e) {
             Log::error("Failed to classify order {$order->id}: {$e->getMessage()}");
 
@@ -55,6 +55,15 @@ class ClassifyOrder implements ShouldQueue
                 'risk_level' => RiskLevel::Suspicious,
                 'ai_reasoning' => 'Classificação automática falhou: ' . $e->getMessage(),
                 'status' => OrderStatus::Reviewing,
+            ]);
+
+            $this->rabbitMQ->publish('order.suspicious', [
+                'order_id' => $order->id,
+                'risk_level' => RiskLevel::Suspicious->value,
+                'status' => OrderStatus::Reviewing->value,
+                'amount' => $order->amount,
+                'description' => $order->description,
+                'reasoning' => 'Classificação automática falhou: ' . $e->getMessage(),
             ]);
         }
     }
