@@ -66,12 +66,31 @@ services:
     networks:
       - pipeline-network
 
-  worker:
+  worker-classification:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: orders-worker
-    command: php artisan orders:consume
+    container_name: orders-worker-classification
+    command: php artisan worker:classification
+    volumes:
+      - .:/var/www
+    depends_on:
+      app:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pipeline-network
+
+  worker-audit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: orders-worker-audit
+    command: php artisan worker:audit
     volumes:
       - .:/var/www
     depends_on:
