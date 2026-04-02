@@ -6,7 +6,7 @@ use App\Models\Order;
 use DateTimeImmutable;
 use Illuminate\Support\Str;
 
-class OrderCreated implements DomainEvent
+class OrderClassified implements DomainEvent
 {
     private string $eventId;
     private DateTimeImmutable $occurredAt;
@@ -19,7 +19,7 @@ class OrderCreated implements DomainEvent
 
     public function eventType(): string
     {
-        return 'order.created';
+        return "order.classified.{$this->order->risk_level->value}";
     }
 
     public function occurredAt(): DateTimeImmutable
@@ -36,8 +36,11 @@ class OrderCreated implements DomainEvent
     {
         return [
             'order_id' => $this->order->id,
-            'description' => $this->order->description,
+            'risk_level' => $this->order->risk_level->value,
+            'status' => $this->order->status->value,
             'amount' => $this->order->amount,
+            'description' => $this->order->description,
+            'reasoning' => $this->order->ai_reasoning,
         ];
     }
 }
