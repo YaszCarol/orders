@@ -59,9 +59,11 @@ class RabbitMQService
                 ]));
 
                 // Retry queue with TTL, DLX pointing back to main exchange
+                $routingKey = $routingKeys[0] ?? $queueName;
                 $this->channel->queue_declare("{$queueName}.retry", false, true, false, false, false, new AMQPTable([
                     'x-message-ttl' => $retryDelayMs,
                     'x-dead-letter-exchange' => $exchange,
+                    'x-dead-letter-routing-key' => $routingKey,
                 ]));
 
                 // Bind retry queue to retry exchange

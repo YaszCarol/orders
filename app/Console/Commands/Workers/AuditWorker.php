@@ -10,7 +10,7 @@ use PhpAmqpLib\Message\AMQPMessage;
 class AuditWorker extends Command
 {
     protected $signature = 'worker:audit';
-    protected $description = 'Consume all order events for audit logging';
+    protected $description = 'Consume fraud and suspicious order events for audit logging';
 
     private bool $shouldStop = false;
 
@@ -48,7 +48,7 @@ class AuditWorker extends Command
             $message->ack();
         });
 
-        $this->info('Listening on queue: orders.audit (order.#)');
+        $this->info('Listening on queue: orders.audit (order.classified.fraud, order.classified.suspicious)');
 
         $channel = $rabbitMQ->getChannel();
 
