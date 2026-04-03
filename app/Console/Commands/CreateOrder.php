@@ -2,11 +2,8 @@
 
 namespace App\Console\Commands;
 
-use App\EventBus\EventBusInterface;
-use App\Events\OrderCreated;
-use App\Models\Order;
+use App\Services\OrderService;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
 
 class CreateOrder extends Command
 {
@@ -16,7 +13,7 @@ class CreateOrder extends Command
 
     protected $description = 'Create a test order and publish OrderCreated event';
 
-    public function handle(EventBusInterface $eventBus): int
+    public function handle(OrderService $orderService): int
     {
         $description = $this->option('description')
             ?? $this->ask('Order description');
@@ -24,16 +21,10 @@ class CreateOrder extends Command
         $amount = $this->option('amount')
             ?? $this->ask('Order amount (R$)');
 
-        $order = DB::transaction(function () use ($eventBus, $description, $amount) {
-            $order = Order::create([
-                'description' => $description,
-                'amount' => (float) $amount,
-            ]);
-
-            $eventBus->publish(new OrderCreated($order));
-
-            return $order;
-        });
+        $order = $orderService->create([
+            'description' => $description,
+            'amount' => (float) $amount,
+        ]);
 
         $this->info("Order created: {$order->id}");
         $this->table(

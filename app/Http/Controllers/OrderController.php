@@ -2,22 +2,22 @@
 
 namespace App\Http\Controllers;
 
-use App\EventBus\EventBusInterface;
-use App\Events\OrderCreated;
 use App\Models\Order;
+use App\Repositories\OrderRepositoryInterface;
+use App\Services\OrderService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 
 class OrderController extends Controller
 {
-    public function __construct(private EventBusInterface $eventBus) {}
+    public function __construct(
+        private OrderService $orderService,
+        private OrderRepositoryInterface $repository,
+    ) {}
 
     public function index(): JsonResponse
     {
-        return response()->json(
-            Order::latest()->paginate(15)
-        );
+        return response()->json($this->repository->paginate());
     }
 
     public function show(Order $order): JsonResponse
@@ -32,12 +32,7 @@ class OrderController extends Controller
             'amount' => 'required|numeric|min:0.01|max:999999.99',
         ]);
 
-        $order = DB::transaction(function () use ($validated) {
-            $order = Order::create($validated);
-            $this->eventBus->publish(new OrderCreated($order));
-
-            return $order;
-        });
+        $order = $this->orderService->create($validated);
 
         return response()->json($order, 201);
     }
