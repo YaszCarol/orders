@@ -5,12 +5,13 @@ namespace App\Console\Commands;
 use App\Models\OutboxEvent;
 use App\Services\RabbitMQService;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class OutboxRelay extends Command
 {
     protected $signature = 'outbox:relay {--batch=100 : Number of events to process per run}';
-    protected $description = 'Publish pending outbox events to RabbitMQ';
+    protected $description = 'Publish pending outbox events to RabbitMQ (at-least-once delivery)';
 
     public function handle(RabbitMQService $rabbitMQ): int
     {
@@ -34,6 +35,11 @@ class OutboxRelay extends Command
         foreach ($events as $event) {
             try {
                 $rabbitMQ->publish($event->routing_key, $event->payload);
+
+                // Se o processo crashar entre o publish e o update,
+                // a mensagem será republicada na próxima execução.
+                // Isso é seguro porque os consumidores são idempotentes
+                // (ex: ClassificationWorker verifica risk_level !== null).
                 $event->update(['published_at' => now()]);
                 $published++;
             } catch (\Throwable $e) {
