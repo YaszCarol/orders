@@ -17,6 +17,16 @@ class OrderCreated implements DomainEvent
         $this->occurredAt = new DateTimeImmutable();
     }
 
+    public function aggregateId(): string
+    {
+        return $this->order->id;
+    }
+
+    public function aggregateType(): string
+    {
+        return 'order';
+    }
+
     public function eventType(): string
     {
         return 'order.created';

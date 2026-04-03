@@ -27,4 +27,9 @@ class Order extends Model
             'amount' => 'decimal:2',
         ];
     }
+
+    public function events(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(OutboxEvent::class, 'aggregate_id');
+    }
 }

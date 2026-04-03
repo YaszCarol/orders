@@ -10,6 +10,8 @@ class OutboxEventBus implements EventBusInterface
     public function publish(DomainEvent $event): void
     {
         OutboxEvent::create([
+            'aggregate_id' => $event->aggregateId(),
+            'aggregate_type' => $event->aggregateType(),
             'event_type' => $event->eventType(),
             'routing_key' => $event->eventType(),
             'payload' => [

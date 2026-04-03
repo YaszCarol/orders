@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-#[Fillable(['event_type', 'routing_key', 'payload', 'published_at'])]
+#[Fillable(['aggregate_id', 'aggregate_type', 'event_type', 'routing_key', 'payload', 'published_at'])]
 class OutboxEvent extends Model
 {
     use HasFactory, HasUlids;
@@ -20,5 +20,10 @@ class OutboxEvent extends Model
             'payload' => 'array',
             'published_at' => 'datetime',
         ];
+    }
+
+    public function order(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'aggregate_id');
     }
 }
