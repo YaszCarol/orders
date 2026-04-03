@@ -1,58 +1,176 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Order Pipeline — Event-Driven Architecture com RabbitMQ
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Projeto de estudo para aprofundar conhecimentos em **arquitetura orientada a eventos** e **sistemas de mensageria**, evoluindo do modelo tradicional de Events/Listeners/Jobs do Laravel para uma pipeline resiliente com RabbitMQ.
 
-## About Laravel
+Ao criar um pedido, ele é classificado automaticamente por IA (Gemini via Laravel AI) como **seguro**, **suspeito** ou **fraude**, e roteado para as filas corretas via Topic Exchange do RabbitMQ.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Conceitos aplicados
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- **Transactional Outbox Pattern** — pedido e evento salvos atomicamente no banco. Relay publica no RabbitMQ de forma assíncrona, sem risco de perda
+- **Topic Exchange** — o RabbitMQ decide o roteamento por routing key. `order.classified.fraud` cai em `orders.fraud` + `orders.audit` sem o código saber
+- **Dead Letter Exchange (DLX)** — falha no consumer → nack → fila de espera com TTL → reprocessamento automático → após 3 tentativas → Dead Letter Queue
+- **Idempotência** — consumidores verificam o estado antes de processar, tornando reentregas seguras (at-least-once delivery)
+- **Clean Architecture** — Controller valida e delega. Service orquestra. Repository abstrai persistência. Worker cuida apenas de infraestrutura
 
-## Learning Laravel
+---
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Fluxo
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+```
+POST /api/orders
+      │
+      └── DB::transaction {
+              INSERT orders
+              INSERT outbox_events   ← atomicidade garantida
+          }
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+outbox:relay (a cada 5s)
+      └── publica order.created no RabbitMQ
+              │
+              RabbitMQ Topic Exchange
+              │
+              └── orders.created → ClassificationWorker
+                        │
+                        ├── Gemini AI classifica
+                        │
+                        └── DB::transaction {
+                                UPDATE order (risk_level, status)
+                                INSERT outbox_events (order.classified.*)
+                            }
 
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+outbox:relay (2ª execução)
+      └── publica order.classified.* no RabbitMQ
+              │
+              ├── order.classified.safe       → orders.classified.safe
+              ├── order.classified.suspicious → orders.classified.suspicious + orders.audit
+              └── order.classified.fraud      → orders.classified.fraud      + orders.audit
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+### Retry com DLX
 
-## Contributing
+```
+Worker falha → nack → orders.created.retry (TTL 5s)
+                              ↓ expira
+                       orders.created (retry 1)
+                              ↓ falha de novo
+                       ... até 3 tentativas
+                              ↓
+                       orders.dead-letter
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+---
 
-## Code of Conduct
+## Stack
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+| Tecnologia | Uso |
+|---|---|
+| Laravel 13 + PHP 8.4 | Framework principal |
+| RabbitMQ | Message broker com Topic Exchange, DLX e TTL |
+| Laravel AI + Gemini | Classificação de pedidos por IA |
+| MySQL | Persistência + tabela outbox |
+| Docker Compose | Orquestração de todos os serviços |
+| PHPUnit | 58 testes cobrindo domínio, infra e integração |
 
-## Security Vulnerabilities
+---
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+## Estrutura relevante
 
-## License
+```
+app/
+├── Console/Commands/
+│   ├── OutboxRelay.php              # Publica outbox → RabbitMQ
+│   └── Workers/
+│       ├── ClassificationWorker.php # Consome orders.created
+│       └── AuditWorker.php          # Consome orders.audit
+├── EventBus/
+│   ├── EventBusInterface.php        # Contrato de publicação
+│   └── OutboxEventBus.php           # Implementação via banco
+├── Events/
+│   ├── DomainEvent.php              # Interface base
+│   ├── OrderCreated.php
+│   └── OrderClassified.php
+├── Repositories/
+│   ├── OrderRepositoryInterface.php
+│   └── EloquentOrderRepository.php
+└── Services/
+    ├── OrderService.php             # Cria pedido + publica evento
+    ├── ClassificationService.php    # Classifica + emite evento
+    └── RabbitMQService.php          # Conexão, topologia, publish/consume
+```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+---
+
+## Como rodar
+
+### Pré-requisitos
+- Docker e Docker Compose
+- Chave de API do Gemini (gratuita em [aistudio.google.com](https://aistudio.google.com))
+
+### Setup
+
+```bash
+git clone <repo>
+cd orders
+
+cp .env.example .env
+# Adicione sua GEMINI_API_KEY no .env
+
+docker compose up -d --build
+docker compose exec app php artisan migrate
+```
+
+### Endpoints
+
+```bash
+# Criar pedido
+POST http://localhost:8080/api/orders
+{
+  "description": "Notebook Dell XPS 15",
+  "amount": 8500
+}
+
+# Listar pedidos
+GET http://localhost:8080/api/orders
+
+# Detalhar pedido
+GET http://localhost:8080/api/orders/{id}
+```
+
+### Testando o fluxo manualmente
+
+```bash
+# 1. Criar pedido
+docker compose exec app php artisan orders:create --description="Teste" --amount=500
+
+# 2. Publicar no RabbitMQ (simula o scheduler)
+docker compose exec app php artisan outbox:relay
+
+# 3. Classificar com IA
+docker compose exec app php artisan worker:classification
+
+# 4. Publicar eventos de classificação
+docker compose exec app php artisan outbox:relay
+```
+
+Painel do RabbitMQ: [http://localhost:15672](http://localhost:15672) — usuário `guest`, senha `guest`
+
+### Testes
+
+```bash
+docker compose exec app php artisan test
+```
+
+---
+
+## Serviços Docker
+
+| Container | Função |
+|---|---|
+| `orders-app` | PHP-FPM (API) |
+| `orders-nginx` | Servidor HTTP na porta 8080 |
+| `orders-mysql` | Banco de dados |
+| `orders-rabbitmq` | Message broker (porta 5672 / painel 15672) |
+| `orders-worker-classification` | Worker de classificação |
+| `orders-worker-audit` | Worker de auditoria |
