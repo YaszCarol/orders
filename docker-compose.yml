@@ -51,23 +51,46 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: orders-rabbitmq
+    hostname: orders-rabbitmq
     ports:
       - "5672:5672"
       - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 12
+      start_period: 30s
     networks:
       - pipeline-network
 
-  worker:
+  worker-classification:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: orders-worker
-    command: php artisan orders:consume
+    container_name: orders-worker-classification
+    command: php artisan worker:classification
+    volumes:
+      - .:/var/www
+    depends_on:
+      app:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - pipeline-network
+
+  worker-audit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: orders-worker-audit
+    command: php artisan worker:audit
     volumes:
       - .:/var/www
     depends_on:
@@ -83,6 +106,7 @@ services:
 
 volumes:
   mysql-data:
+  rabbitmq-data:
 
 networks:
   pipeline-network:
